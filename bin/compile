@@ -1,0 +1,102 @@
+#!/bin/bash -e
+
+set -e
+
+steptxt="----->"
+
+start() {
+    echo -n "$steptxt $@... "
+}
+
+finished() {
+    echo "done"
+}
+
+CURL="curl -s -L --retry 15 --retry-delay 2" # retry for up to 30 seconds
+
+# YAML parser from https://gist.github.com/pkuczynski/8665367
+parse_yaml() {
+   local prefix=$2
+   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
+   sed -ne "s|^\($s\)\($w\)$s:$s\"\(.*\)\"$s\$|\1$fs\2$fs\3|p" \
+        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p"  $1 |
+   awk -F$fs '{
+      indent = length($1)/2;
+      vname[indent] = $2;
+      for (i in vname) {if (i > indent) {delete vname[i]}}
+      if (length($3) > 0) {
+         vn=""; for (i=0; i<indent; i++) {vn=(vn)(vname[i])("_")}
+         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, $2, $3);
+      }
+   }'
+}
+
+function json_value() {
+  KEY=$1
+  num=$2
+  awk -F"[,:}]" '{for(i=1;i<=NF;i++){if($i~/\042'$KEY'\042/){print $(i+1)}}}' | tr -d ' "' | sed -n ${num}p
+}
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+if [ -f $BUILD_DIR/.crystal-version ]; then
+  CRYSTAL_VERSION=`cat $BUILD_DIR/.crystal-version | tr -d '\012'`
+  CRYSTAL_VERSION_REASON='due to .crystal-version file'
+else
+  CRYSTAL_VERSION=`${CURL} https://api.github.com/repos/crystal-lang/crystal/releases/latest | json_value tag_name 1 | tr -d '\012'`
+  CRYSTAL_VERSION_REASON='due to latest release at https://github.com/crystal-lang/crystal'
+fi
+
+CRYSTAL_URL=`${CURL} https://api.github.com/repos/crystal-lang/crystal/releases/tags/${CRYSTAL_VERSION} | grep 'https://github.com/crystal-lang/crystal/releases/download/.*-linux-x86_64.tar.gz' | sed 's/.*: "\(.*\)"/\1/'`
+CRYSTAL_DIR=/tmp/crystal
+unset GIT_DIR
+
+# Install Crystal
+mkdir -p $CRYSTAL_DIR
+start "Installing Crystal ($CRYSTAL_VERSION $CRYSTAL_VERSION_REASON) from $CRYSTAL_URL"
+  ${CURL} $CRYSTAL_URL | tar xz -C $CRYSTAL_DIR --strip-component=1
+finished
+PATH="${PATH}:${CRYSTAL_DIR}/bin"
+
+# Build the Amber project
+start "Install project dependencies"
+  cd $BUILD_DIR
+  echo -e "\n"
+  shards install --production
+finished
+
+amber_executable=$CACHE_DIR/bin/amber
+if [ ! -e "$amber_executable" ]; then
+    start "Amber CLI not compiled"
+    start "Installing amber CLI"
+      cd $BUILD_DIR/lib/amber
+      sed -in "4d" $BUILD_DIR/lib/amber/src/amber/cli/commands/database.cr
+      shards update --production
+      mkdir -p $BUILD_DIR/bin
+      echo -e "\n"
+      crystal build --no-debug --stats -o $BUILD_DIR/bin/amber $BUILD_DIR/lib/amber/src/amber/cli.cr
+      mkdir -p $CACHE_DIR/bin/
+      cp -R $BUILD_DIR/bin/amber $CACHE_DIR/bin/
+      cd $ENV_DIR
+    finished
+else
+    start "Amber CLI already compiled, using cached version"
+      mkdir -p $BUILD_DIR/bin/
+      cp -R $CACHE_DIR/bin/amber $BUILD_DIR/bin/
+    finished
+fi
+
+chmod +x $BUILD_DIR/bin/amber
+PATH="${PATH}:${BUILD_DIR}/bin"
+cd $BUILD_DIR
+eval $(parse_yaml shard.yml "shard_")
+
+start "Building src/${shard_name}.cr (auto-detected from shared.yml)"
+  AMBER_ENV=production crystal build --stats --release $BUILD_DIR/src/${shard_name}.cr -o $BUILD_DIR/bin/${shard_name}
+  chmod +x $BUILD_DIR/bin/${shard_name}
+finished
+
+# Export shard_name to be used by release script
+echo ${shard_name} > /tmp/shard_name

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# -p $PORT isn't needed here because amber already uses ENV[PORT] on enviroments configuration
+
+cat << EOF
+---
+addons:
+default_process_types:
+  web: ./bin/$(cat /tmp/shard_name)
+EOF
