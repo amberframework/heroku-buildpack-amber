@@ -12,7 +12,7 @@ You can create an app in Heroku with Amber's buildpack by running the
 following command:
 
 ```bash
-$ heroku create myapp --buildpack https://github.com/amberframework/heroku-buildpack-amber.git
+$ heroku create myapp --buildpack amberframework/amber
 ```
 
 The default behaviour is to use the [latest crystal release](https://github.com/crystal-lang/crystal/releases/latest).
@@ -55,3 +55,10 @@ To learn more about how to deploy other Crystal applications to Heroku, read
 Currently latest Amber `v0.3.6` is compatible with Crystal `v0.23.1`
 
 Other versions aren't guaranteed to be compatible.
+
+## Edge version of the buildpack
+
+The `amberframework/amber` buildpack from the [Heroku Registry](https://devcenter.heroku.com/articles/buildpack-registry) contains the latest stable version of the buildpack. If you'd like to use the latest buildpack code from this Github repository, you can set your buildpack to the Github URL:
+
+    heroku buildpacks:set https://github.com/amberframework/heroku-buildpack-amber
+ 
